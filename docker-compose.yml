@@ -1,0 +1,31 @@
+version: '3.7'
+
+services:
+  endpoint:
+    build:
+      context: endpoint/
+    volumes:
+      - ./endpoint/:/src/
+      - /src/node_modules
+    env_file:
+      - .env
+    ports:
+      - 8000:8000
+    networks:
+      - acs-network
+  application:
+    build:
+      context: application/
+    volumes:
+      - ./application/:/src/
+      - /src/node_modules
+    env_file:
+      - .env
+    ports:
+      - 8080:8080
+    networks:
+      - acs-network
+
+networks:
+  acs-network:
+    driver: bridge
