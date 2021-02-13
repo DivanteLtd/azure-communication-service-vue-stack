@@ -63,12 +63,12 @@ const store = new Vuex.Store({
 
     actions: {
         getAuthData: async function({ commit}) {
-            if (!localStorage.getItem('auth-data-l')) {
+            if (!localStorage.getItem('auth-data')) {
                 await axios.get('http://localhost:8000/issue_access_token').then(result => {
-                  localStorage.setItem('auth-data-l', JSON.stringify(result.data));
+                  localStorage.setItem('auth-data', JSON.stringify(result.data));
                 });
             }
-            commit('setAuthData', JSON.parse(localStorage.getItem('auth-data-l')));
+            commit('setAuthData', JSON.parse(localStorage.getItem('auth-data')));
         },
         startCall: function({ commit, state, dispatch}) {
             const videoDeviceInfo = state.deviceManager.getCameraList()[0];
