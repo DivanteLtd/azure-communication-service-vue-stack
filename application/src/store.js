@@ -39,107 +39,135 @@ const store = new Vuex.Store({
     mutations: {
         setAuthData: async function(state, payload) {
             state.auth = payload;
-            let token
-            await axios.post('http://localhost:8000/get_access_token', state.auth.encrypted_auth ).then(result => {
-                token = result.data
-            });
-            const callClient = new CallClient();    
-            const tokenCredential = new AzureCommunicationTokenCredential(token);
-            state.callAgent = await callClient.createCallAgent(tokenCredential);
-            state.callAgent.on('incomingCall', async function({incomingCall}) {
-                state.call.incoming = true;
-                state.call.outgoing = false;
-                state.incoming.callerId = incomingCall._callerIdentity.communicationUserId;
-                state.call.current = incomingCall;
-            });
-
-            state.deviceManager = await callClient.getDeviceManager();
+        },
+        setPrerequisites: function(state, payload) {
+            state.callAgent = payload.callAgent;
+            state.deviceManager = payload.deviceManager;
             state.outgoing.canCall = true;
         },
         userToCall: function (state, payload) {
             state.outgoing.userToCall = payload
+        },
+        setIncomingContext: function (state, payload) {
+            state.call.incoming = true;
+            state.call.outgoing = false;
+            state.incoming.callerId = payload._callerIdentity.communicationUserId;
+            state.call.current = payload;
+        },
+        setOutgoingContext: function (state) {
+            state.call.outgoing = true;
+            state.call.incoming = false;
+            state.call.showVideo = false;
+            state.call.inProgress = true;
+        },
+        canCall: function (state, payload) {
+            state.outgoing.canCall = payload;
+            state.outgoing.canHangUp = !payload;
+        },
+        callInProgress: function (state, payload) {
+            state.call.inProgress = payload;
+        },
+        setCall: function (state, payload) {
+            state.call.current = payload;
+        },
+        setVideo: function (state, payload) {
+            state.call.showVideo = payload;
+        },
+        hideVideo: function (state) {
+            const videoElement = document.getElementById('video')
+            videoElement.innerHTML = '';
+            state.call.showVideo = false;
         }
     },
 
     actions: {
-        getAuthData: async function({ commit}) {
+        getAuthData: async function({ commit, dispatch }) {
             if (!localStorage.getItem('auth-data')) {
-                await axios.get('http://localhost:8000/issue_access_token').then(result => {
-                  localStorage.setItem('auth-data', JSON.stringify(result.data));
+                await axios.get('/endpoint/issue_access_token').then(async function(result) {
+                    localStorage.setItem('auth-data', JSON.stringify(result.data));
+                    commit('setAuthData', result.data);
+                    dispatch("initPrerequisites", result.data)
                 });
+            } else {
+                dispatch("initPrerequisites", JSON.parse(localStorage.getItem('auth-data')))
             }
-            commit('setAuthData', JSON.parse(localStorage.getItem('auth-data')));
+        },
+        initPrerequisites: async function({ commit, state}, payload) {
+            commit('setAuthData', payload);
+            let token
+            await axios.post('/endpoint/get_access_token', payload.encrypted_auth ).then(result => {
+                token = result.data
+            });
+            const callClient = new CallClient();    
+            const tokenCredential = new AzureCommunicationTokenCredential(token);
+            const callAgent = await callClient.createCallAgent(tokenCredential);
+            callAgent.on('incomingCall', async function({incomingCall}) {
+                commit('setIncomingContext', incomingCall);
+            });
+            const deviceManager = await callClient.getDeviceManager();
+            commit('setPrerequisites', {callAgent: callAgent, deviceManager: deviceManager});
         },
         startCall: function({ commit, state, dispatch}) {
             const videoDeviceInfo = state.deviceManager.getCameraList()[0];
             const localVideoStream = new LocalVideoStream(videoDeviceInfo);
             const callOptions = {videoOptions: {localVideoStreams:[localVideoStream]}};
 
-            state.call.current = state.callAgent.call(
+            const call = state.callAgent.call(
                 [{ communicationUserId: state.outgoing.userToCall }],
                 callOptions
             );
-            state.call.current.on('callEnded', async function(callEndReason) {
-                state.call.outgoing = true;
-                state.call.incoming = false;
-                state.call.showVideo = false;
-                state.outgoing.canCall = true;
-                state.outgoing.canHangUp = false;
-                state.call.inProgress = true;
+            call.on('callEnded', async function(callEndReason) {
+                commit('setOutgoingContext');
+                commit('canCall', true)
+                commit('callInProgress', false);
+                commit('hideVideo')
             });
-
-            state.call.outgoing = true;
-            state.outgoing.canCall = false;
-            state.outgoing.canHangUp = true;
-
+            commit('callInProgress', true);
+            commit("setCall", call)
+            commit('setOutgoingContext');
+            commit('canCall', false)
             dispatch('showVideo')
         },
-        hangUp: function({ commit, state}) {
+        hangUp: function({ commit, state, dispatch }) {
             state.call.current.hangUp({ forEveryone: true });
-            state.outgoing.canCall = true;
-            state.outgoing.canHangUp = false;
-            state.call.showVideo = false;
-            state.call.inProgress = false;
-
-            const videoElement = document.getElementById('video')
-            videoElement.innerHTML = '';
+            commit("setCall", call)
+            commit('setOutgoingContext');
+            commit('hideVideo')
         },
         acceptCall: async function({ commit, state, dispatch}) {
             const videoDeviceInfo = state.deviceManager.getCameraList()[0];
             const localVideoStream = new LocalVideoStream(videoDeviceInfo);
             const callOptions = {videoOptions: {localVideoStreams:[localVideoStream]}};
 
-            state.call.current = await state.call.current.accept(callOptions);
-            state.call.current.on('callEnded', async function(callEndReason) {
-                state.call.outgoing = true;
-                state.call.incoming = false;
-                state.call.showVideo = false;
-                state.outgoing.canCall = true;
-                state.outgoing.canHangUp = false;
-                state.call.inProgress = true;
+            const call = await state.call.current.accept(callOptions);
+            call.on('callEnded', function(callEndReason) {
+                commit('setOutgoingContext');
+                commit('callInProgress', false);
+                commit('canCall', true)
+                commit('hideVideo')
             });
+            commit('callInProgress', true);
+            commit("setCall", call)
             dispatch('showVideo')
         },
-        declineCall: function({ commit, state}) {
+        declineCall: function({ commit, state, dispatch }) {
             if (state.call.inProgress) {
-                state.call.inProgress = false;
                 state.call.current.hangUp({ forEveryone: true });
+                commit('callInProgress', false);
             } else {
                 state.call.current.reject();
             }
-            state.call.outgoing = true;
-            state.call.incoming = false;
-            state.call.showVideo = false;
-            state.outgoing.canCall = true;
-            state.outgoing.canHangUp = false;
+            commit("setCall", {})
+            commit('setOutgoingContext');
+            commit('canCall', true)
+            commit('hideVideo')
         },
         showVideo: async function({ commit, state}) {
-            state.call.inProgress = true;
-            state.call.showVideo = true;
             const stream = state.call.current.remoteParticipants[0].videoStreams[0];
             const renderer = new Renderer(stream);
             const view = await renderer.createView();
-            
+
+            commit("setVideo", true)
             const videoElement = document.getElementById('video');
             videoElement.appendChild(view.target);
         }

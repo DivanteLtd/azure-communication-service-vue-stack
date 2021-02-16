@@ -10,7 +10,7 @@ services:
     env_file:
       - .env
     ports:
-      - 8000:8000
+      - 8081:8081
     networks:
       - acs-network
   application:
@@ -25,7 +25,17 @@ services:
       - 8080:8080
     networks:
       - acs-network
-
+  nginx:
+    build:
+      context: nginx/
+    ports:
+      - 80:80
+    networks:
+      - acs-network
+    depends_on:
+      - endpoint
+      - application
+      
 networks:
   acs-network:
     driver: bridge

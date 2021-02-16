@@ -6,6 +6,7 @@ EXPOSE 8000
 CMD ["node", "server.js"]
 
 COPY package.json /src
+COPY package-lock.json /src
 RUN npm install
 
 COPY . /src
